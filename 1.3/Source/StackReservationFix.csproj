@@ -9,9 +9,10 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>StackReservationFix</RootNamespace>
     <AssemblyName>StackReservationFix</AssemblyName>
-    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
+    <TargetFrameworkProfile />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>false</DebugSymbols>
@@ -36,7 +37,8 @@
       <HintPath>..\..\..\..\..\..\workshop\content\294100\1617282896\1.3\Assemblies\LWM.DeepStorage.dll</HintPath>
       <Private>False</Private>
     </Reference>
-    <Reference Include="PickUpAndHaul">
+    <Reference Include="PickUpAndHaul, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
       <HintPath>..\..\..\..\..\..\workshop\content\294100\1279012058\1.3\Assemblies\PickUpAndHaul.dll</HintPath>
       <Private>False</Private>
     </Reference>
@@ -51,9 +53,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="DeepStorageHelper.cs" />
+    <Compile Include="PickupAndHaulHelper.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ReservationManager_Reserve_Patch.cs" />
     <Compile Include="StackReservationFixMod.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Krafs.Publicizer">

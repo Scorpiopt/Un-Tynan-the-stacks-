@@ -21,16 +21,44 @@ namespace StackReservationFix
                 if (comp != null)
                 {
                     Log.Message("initial: " + allStacks);
+                    var firstHauledThing = FirstHauledThingFromJob(job);
                     allStacks += GetAllStacksGoingToStorage(hauler, cell, job);
                     if (allStacks > comp.maxNumberStacks + 1)
                     {
                         canUse = false;
                     }
-                    Log.Message(hauler + " - All stacks: " + allStacks + " - for cell " + cell + " - " + canUse);
+                    Log.Message(hauler + " - All stacks: " + allStacks + " - for cell " + cell + " - " + canUse + " - job: " + job + " - firstHauledThing: " + firstHauledThing);
+                    if (firstHauledThing != null)
+                    {
+                        Log.Message("Capacity to store: " + firstHauledThing + " - is " + comp.CapacityToStoreThingAt(firstHauledThing, hauler.Map, cell));
+                    }
                     return true;
                 }
             }
             return false;
+        }
+
+        public static Thing FirstHauledThingFromJob(Job job)
+        {
+            if (job != null)
+            {
+                if (job.def.defName == "HaulToInventory")
+                {
+                    return job.targetA.Thing;
+                }
+                else if (job.def.defName == "UnloadYourHauledInventory")
+                {
+                    if (!(job.targetA.Thing is Pawn))
+                    {
+                        return job.targetA.Thing;
+                    }
+                }
+                else if (job.def == JobDefOf.HaulToCell)
+                {
+                    return job.targetA.Thing;
+                }
+            }
+            return null;
         }
 
         public static int GetAllStacksGoingToStorage(Pawn hauler, IntVec3 cell, Job job)

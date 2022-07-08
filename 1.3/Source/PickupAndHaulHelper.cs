@@ -1,4 +1,6 @@
-﻿using RimWorld;
+﻿using HarmonyLib;
+using RimWorld;
+using System.Collections.Generic;
 using System.Linq;
 using Verse;
 using Verse.AI;
@@ -6,8 +8,24 @@ using static Verse.AI.ReservationManager;
 
 namespace StackReservationFix
 {
+    [StaticConstructorOnStartup]
     public static class PickupAndHaulHelper
     {
+		static PickupAndHaulHelper()
+        {
+			StackReservationFixMod.harmony.Patch(AccessTools.Method(typeof(PickUpAndHaul.WorkGiver_HaulToInventory),
+				nameof(PickUpAndHaul.WorkGiver_HaulToInventory.AllocateThingAtCell)), 
+				postfix: new HarmonyMethod(AccessTools.Method(typeof(PickupAndHaulHelper), nameof(RegisterThings))));
+		}
+
+		public static void RegisterThings(Dictionary<PickUpAndHaul.WorkGiver_HaulToInventory.StoreTarget, 
+			PickUpAndHaul.WorkGiver_HaulToInventory.CellAllocation> storeCellCapacity)
+        {
+			foreach (var kvp in storeCellCapacity)
+            {
+				Log.Message("storeCellCapacity: " + kvp.Key.cell + " - allocated: " + kvp.Value.allocated + " - capacity: " + kvp.Value.capacity);
+            }
+        }
         public static void PickupTest(WorkGiver_Scanner __instance, Pawn pawn, Thing thing, bool forced)
         {
             if (__instance is PickUpAndHaul.WorkGiver_HaulToInventory haul)

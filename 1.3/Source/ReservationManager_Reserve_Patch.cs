@@ -48,12 +48,12 @@ namespace StackReservationFix
         {
             if (__result)
             {
+                Log.Message("IsGoodStoreCell --------------------- " + carrier + " job " + carrier.CurJob.JobSummary());
                 var job = carrier.CurJob;
                 bool carryingJob = job.IsHaulingJob();
-                Log.Message(job + " - carryingJob: " + carryingJob + " - t: " + t);
+                Log.Message(carrier + " - " + job.JobSummary() + " - carryingJob: " + carryingJob + " - t: " + t);
                 if (StackReservationFixMod.deepStorageLoaded
-                    && DeepStorageHelper.HasDeepStorageAndCanUse(!carryingJob ? Mathf.Max(1, t.stackCount / t.def.stackLimit) : 0,
-                    carryingJob ? job : null, carrier, c, out var canUse))
+                    && DeepStorageHelper.HasDeepStorageAndCanUse(t, carryingJob ? job : null, carrier, c, out var canUse))
                 {
                     __result = canUse;
                     Log.Message("good cell: " + c + " - " + __result + " for " + t);
@@ -63,6 +63,7 @@ namespace StackReservationFix
                         Log.Message("Registering " + t + " for " + c);
                     }
                 }
+                Log.Message("---------------------");
             }
         }
     }
@@ -77,8 +78,8 @@ namespace StackReservationFix
             {
                 if (StackReservationFixMod.deepStorageLoaded)
                 {
-                    Log.Message("--------------------------");
-                    if (job.IsHaulingJob() && DeepStorageHelper.HasDeepStorageAndCanUse(0, job, claimant, target.Cell, out var canUse))
+                    Log.Message("Reserve -------------------------- " + claimant + " job: " + job.JobSummary());
+                    if (job.IsHaulingJob() && DeepStorageHelper.HasDeepStorageAndCanUse(null, job, claimant, target.Cell, out var canUse))
                     {
                         __result = canUse;
                         Log.Message($"Preventing reservation on {target} for pawn {claimant} - {job.targetA.Thing} - __result: {__result}");
@@ -86,7 +87,7 @@ namespace StackReservationFix
                     }
                     else
                     {
-                        Log.Message("Failed: " + claimant + " - " + job + " - " + target + " - " + job.IsHaulingJob());
+                        Log.Message("Failed: " + claimant + " - " + job.JobSummary() + " - " + target + " - " + job.IsHaulingJob());
                         Find.TickManager.CurTimeSpeed = TimeSpeed.Paused;
                     }
                     Log.Message("--------------------------");

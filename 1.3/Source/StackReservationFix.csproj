@@ -58,7 +58,6 @@
   <ItemGroup>
     <Compile Include="DeepStorageHelper.cs" />
     <Compile Include="Helpers.cs" />
-    <Compile Include="HoldMultipleThings_Support.cs" />
     <Compile Include="PickupAndHaulHelper.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ReservationManager_Reserve_Patch.cs" />

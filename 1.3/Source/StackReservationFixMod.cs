@@ -53,22 +53,31 @@ namespace StackReservationFix
         }
     }
     
-    //[HarmonyPatch(typeof(ThinkNode_JobGiver), "TryIssueJobPackage")]
-    //public class TryIssueJobPackage
-    //{
-    //    private static void Postfix(ThinkNode_JobGiver __instance, ThinkResult __result, Pawn pawn, JobIssueParams jobParams)
-    //    {
-    //        try
-    //        {
-    //            pawn.jobs.debugLog = pawn.ShouldLog();
-    //            if (pawn.ShouldLog() && __result.Job != null)
-    //            {
-    //                Log.Message(pawn + " gets " + __result.Job + " from " + __instance);
-    //            }
-    //        }
-    //        catch { }
-    //    }
-    //}
+    [HarmonyPatch(typeof(JobGiver_Work), "TryIssueJobPackage")]
+    public class JobGiver_Work_TryIssueJobPackage_Patch
+    {
+        public static Pawn curPawn;
+        private static void Prefix(ThinkNode_JobGiver __instance, ThinkResult __result, Pawn pawn, JobIssueParams jobParams)
+        {
+            curPawn = pawn;
+            Log.Message("pawn: " + curPawn);
+        }
+
+        private static void Postfix(ThinkNode_JobGiver __instance, ThinkResult __result, Pawn pawn, JobIssueParams jobParams)
+        {
+            curPawn = null;
+            Log.Message("pawn: " + curPawn);
+            try
+            {
+                pawn.jobs.debugLog = pawn.ShouldLog();
+                if (pawn.ShouldLog() && __result.Job != null)
+                {
+                    Log.Message(pawn + " gets " + __result.Job + " from " + __instance);
+                }
+            }
+            catch { }
+        }
+    }
     //
     [StaticConstructorOnStartup]
     public static class Startup2
@@ -145,7 +154,6 @@ namespace StackReservationFix
             if (pawn.ShouldLog())
             {
                 Log.Message(pawn + " TEST gets " + __result + " from " + __instance);
-                PickupAndHaulHelper.PickupTest(__instance, pawn, thing, forced);
             }
         }
     

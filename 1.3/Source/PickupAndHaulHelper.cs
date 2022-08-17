@@ -1,9 +1,12 @@
 ﻿using HarmonyLib;
+using Ionic.Zlib;
 using RimWorld;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection.Emit;
 using Verse;
 using Verse.AI;
+using static PickUpAndHaul.WorkGiver_HaulToInventory;
 using static Verse.AI.ReservationManager;
 
 namespace StackReservationFix
@@ -15,16 +18,44 @@ namespace StackReservationFix
         {
 			StackReservationFixMod.harmony.Patch(AccessTools.Method(typeof(PickUpAndHaul.WorkGiver_HaulToInventory),
 				nameof(PickUpAndHaul.WorkGiver_HaulToInventory.AllocateThingAtCell)), 
-				postfix: new HarmonyMethod(AccessTools.Method(typeof(PickupAndHaulHelper), nameof(RegisterThings))));
-		}
+				transpiler: new HarmonyMethod(AccessTools.Method(typeof(PickupAndHaulHelper), nameof(AllocateThingAtCellTranspiler))));
+			StackReservationFixMod.harmony.Patch(AccessTools.Method(typeof(PickUpAndHaul.CompHauledToInventory),
+				nameof(PickUpAndHaul.CompHauledToInventory.RegisterHauledItem)),
+				postfix: new HarmonyMethod(AccessTools.Method(typeof(PickupAndHaulHelper), nameof(RegisterHauledItemPostfix))));
+        }
 
-		public static void RegisterThings(Dictionary<PickUpAndHaul.WorkGiver_HaulToInventory.StoreTarget, 
-			PickUpAndHaul.WorkGiver_HaulToInventory.CellAllocation> storeCellCapacity)
+        public static void RegisterHauledItemPostfix(Thing thing)
         {
-			foreach (var kvp in storeCellCapacity)
-            {
-				Log.Message("storeCellCapacity: " + kvp.Key.cell + " - allocated: " + kvp.Value.allocated + " - capacity: " + kvp.Value.capacity);
+			if (thing.ParentHolder is Pawn_InventoryTracker pawn_InventoryTracker)
+			{
+				Helpers.AddThingHaul(pawn_InventoryTracker.pawn, pawn_InventoryTracker.pawn.CurJob.targetB.Cell, thing, thing.stackCount);
+                Log.Message("RegisterHauledItemPostfix: " + thing + " - " + thing.stackCount + pawn_InventoryTracker.pawn.CurJob.JobSummary(pawn_InventoryTracker.pawn));
             }
+        }
+        public static IEnumerable<CodeInstruction> AllocateThingAtCellTranspiler(IEnumerable<CodeInstruction> codeInstructions)
+        {
+			var codes = codeInstructions.ToList();
+			for (var i = 0; i < codes.Count; i++)
+            {
+				var code = codes[i];
+				if (code.opcode == OpCodes.Ldc_I4_1 && codes[i + 1].opcode == OpCodes.Ret)
+                {
+					yield return new CodeInstruction(OpCodes.Ldarg_1);
+					yield return new CodeInstruction(OpCodes.Ldloc_2);
+					yield return new CodeInstruction(OpCodes.Ldarg_2);
+					yield return new CodeInstruction(OpCodes.Ldloc_3);
+					yield return new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(PickupAndHaulHelper), nameof(RegisterThing)));
+
+
+				}
+				yield return code;
+            }
+        }
+
+		public static void RegisterThing(Pawn hauler, PickUpAndHaul.WorkGiver_HaulToInventory.StoreTarget storeTarget, Thing thing, int count)
+        {
+			Log.Message("RegisterThing: " + hauler + " - storeTarget: " + storeTarget + " - thing: " + thing + " - count: " + count);
+			Helpers.AddThingHaul(hauler, storeTarget.cell, thing, count);
         }
         public static void PickupTest(WorkGiver_Scanner __instance, Pawn pawn, Thing thing, bool forced)
         {
@@ -36,7 +67,6 @@ namespace StackReservationFix
                         + PickUpAndHaul.WorkGiver_HaulToInventory.IsNotCorpseOrAllowed(thing) + " - " 
                         + HaulAIUtility.PawnCanAutomaticallyHaulFast(pawn, thing, forced) + " - " 
                         + TryFindBestBetterStorageFor(thing, pawn, pawn.Map, StoreUtility.CurrentStoragePriorityOf(thing), pawn.Faction, out _, out _, false));
-                    Log.ResetMessageCount();
                     foreach (var storage in pawn.Map.listerThings.AllThings.OfType<Building_Storage>())
                     {
                         foreach (var cell in storage.AllSlotCells())

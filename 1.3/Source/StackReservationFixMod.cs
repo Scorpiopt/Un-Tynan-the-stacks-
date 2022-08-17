@@ -1,5 +1,10 @@
 ﻿using HarmonyLib;
 using RimWorld;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Reflection;
 using UnityEngine;
 using Verse;
 using Verse.AI;
@@ -36,23 +41,170 @@ namespace StackReservationFix
     [HarmonyPatch(typeof(Pawn_JobTracker), "EndCurrentJob")]
     public class EndCurrentJobPatch
     {
-        private static void Prefix(Pawn_JobTracker __instance, Pawn ___pawn, JobCondition condition, ref bool startNewJob, bool canReturnToPool = true)
+        private static void Prefix(out Pawn __state, Pawn_JobTracker __instance, Pawn ___pawn, JobCondition condition, ref bool startNewJob, bool canReturnToPool = true)
         {
-            try
+            __state = JobGiver_Work_TryIssueJobPackage_Patch.curPawn;
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = ___pawn;
+            if (___pawn.jobs?.jobQueue?.jobs is null || ___pawn.jobs.jobQueue.jobs.Any(x => x.job.def.defName == "HaulToInventory") is false)
             {
-                if (___pawn.CurJob.haulMode == HaulMode.ToCellStorage)
+                if (Helpers.haulers.TryGetValue(___pawn, out var list))
                 {
-                    Thing thing = ___pawn.CurJob.GetTarget(TargetIndex.A).Thing;
-                    if (!___pawn.jobs.curJob.GetTarget(TargetIndex.B).Cell.IsValidStorageFor(___pawn.Map, thing))
-                    {
-                        Log.Message("Is not valid storage anymore: " + ___pawn.jobs.curJob.GetTarget(TargetIndex.B).Cell + " - " + thing);
-                    }
+                    list.thingsToHaul.RemoveAll(x => x.Key.ParentHolder is not Pawn_InventoryTracker);
                 }
             }
-            catch { };
+        }
+        public static void Postfix(Pawn __state)
+        {
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = __state;
         }
     }
-    
+
+    [HarmonyPatch]
+    public static class Toils_Haul_CheckForGetOpportunityDuplicate_Patch
+    {
+        [HarmonyTargetMethod]
+        public static MethodBase GetMethod()
+        {
+            return typeof(Toils_Haul).GetNestedTypes(AccessTools.all).SelectMany(x => x.GetMethods(AccessTools.all).Where(x => x.Name.Contains("<CheckForGetOpportunityDuplicate>"))).ToList()[1];
+        }
+        public static void Prefix(Pawn ___actor, out Pawn __state)
+        {
+            __state = JobGiver_Work_TryIssueJobPackage_Patch.curPawn;
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = ___actor;
+        }
+
+        public static void Postfix(Pawn __state)
+        {
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = __state;
+        }
+    }
+
+    [HarmonyPatch]
+    public static class JobDriver_HaulToCell_FailCondition_Patch
+    {
+        [HarmonyTargetMethod]
+        public static MethodBase GetMethod()
+        {
+            return typeof(JobDriver_HaulToCell).GetNestedTypes(AccessTools.all).First().GetMethods(AccessTools.all)
+                .FirstOrDefault(x => x.Name.Contains("<MakeNewToils>"));
+        }
+        public static void Prefix(Toil ___toilGoto, out Pawn __state)
+        {
+            __state = JobGiver_Work_TryIssueJobPackage_Patch.curPawn;
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = ___toilGoto.actor;
+        }
+
+        public static void Postfix(Pawn __state)
+        {
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = __state;
+        }
+    }
+
+    [HarmonyPatch(typeof(StoreUtility), "TryFindBestBetterStoreCellForWorker")]
+    public static class StoreUtility_TryFindBestBetterStoreCellForWorker_Patch
+    {
+        public static void Prefix(Thing t, Pawn carrier, out Pawn __state)
+        {
+            __state = JobGiver_Work_TryIssueJobPackage_Patch.curPawn;
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = carrier;
+        }
+        public static void Postfix(Pawn __state)
+        {
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = __state;
+        }
+    }
+
+    [HarmonyPatch(typeof(StoreUtility), "IsGoodStoreCell")]
+    public static class StoreUtility_IsGoodStoreCell_Patch
+    {
+        public static void Prefix(Thing t, Pawn carrier, out Pawn __state)
+        {
+            __state = JobGiver_Work_TryIssueJobPackage_Patch.curPawn;
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = carrier;
+        }
+        private static void Postfix(ref bool __result, IntVec3 c, Map map, Thing t, Pawn carrier, Faction faction, Pawn __state)
+        {
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = __state;
+            if (__result)
+            {
+                Log.Message("IsGoodStoreCell --------------------- " + carrier + " - t: " + t + " job " + carrier.CurJob.JobSummary(carrier) + " - " + new StackTrace());
+                var job = carrier.CurJob;
+                bool carryingJob = job.IsHaulingJob();
+                if (StackReservationFixMod.deepStorageLoaded
+                    && DeepStorageHelper.HasDeepStorageAndCanUse(t, carryingJob ? job : null, carrier, c, out var canUse))
+                {
+                    __result = canUse;
+                    Log.Message("good cell: " + c + " - " + __result + " for " + t);
+                    if (__result)
+                    {
+                        Helpers.thingsByCell[t] = c;
+
+                        Log.Message("Registering " + t + " for " + c);
+                    }
+                }
+                Log.Message("---------------------");
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(ThingOwner<Thing>), "TryAdd", new Type[]
+    {
+        typeof(Thing),
+        typeof(bool)
+    })]
+    public static class ThingOwner_TryAdd_Patch
+    {
+        public static void Postfix(ThingOwner<Thing> __instance, bool __result, Thing item)
+        {
+            if (__result)
+            {
+                if (__instance.Owner is Pawn_CarryTracker equipmentTracker)
+                {
+                    Log.Message(equipmentTracker.pawn + " is carrying " + item + " stackCount: " + item.stackCount + " - job: " + equipmentTracker.pawn.CurJob.JobSummary(equipmentTracker.pawn) + new StackTrace());
+                }
+                else if (__instance.Owner is Pawn_InventoryTracker inventoryTracker)
+                {
+                    Log.Message(inventoryTracker.pawn + " grabbed " + item + " stackCount: " + item.stackCount + " - " + " job: " + inventoryTracker.pawn.CurJob.JobSummary(inventoryTracker.pawn) + new StackTrace());
+                    Find.TickManager.CurTimeSpeed = TimeSpeed.Paused;
+                }
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(JobQueue), "EnqueueFirst")]
+    public static class JobQueue_EnqueueFirst_Patch
+    {
+        public static void Postfix(Job j)
+        {
+            Log.Message("Enqueue first: " + j.JobSummary(null) + " - " + new StackTrace());
+        }
+    }
+
+    [HarmonyPatch(typeof(JobQueue), "EnqueueLast")]
+    public static class JobQueue_EnqueueLast_Patch
+    {
+        public static void Postfix(Job j)
+        {
+            Log.Message("Enqueue last: " + j.JobSummary(null) + " - " + new StackTrace());
+        }
+    }
+
+    [HarmonyPatch(typeof(StoreUtility), "IsValidStorageFor")]
+    public static class StoreUtility_IsValidStorageFor_Patch
+    {
+        public static void Prefix(IntVec3 c, Map map, Thing storable, out Pawn __state)
+        {
+            __state = JobGiver_Work_TryIssueJobPackage_Patch.curPawn;
+            if (storable.ParentHolder is Pawn_CarryTracker carryTracker)
+            {
+                JobGiver_Work_TryIssueJobPackage_Patch.curPawn = carryTracker.pawn;
+            }
+        }
+        public static void Postfix(Pawn __state)
+        {
+            JobGiver_Work_TryIssueJobPackage_Patch.curPawn = __state;
+        }
+    }
     [HarmonyPatch(typeof(JobGiver_Work), "TryIssueJobPackage")]
     public class JobGiver_Work_TryIssueJobPackage_Patch
     {
@@ -82,7 +234,7 @@ namespace StackReservationFix
     [StaticConstructorOnStartup]
     public static class Startup2
     {
-        public static bool ShouldLog(this Pawn pawn) => pawn.IsColonist && Find.Selector.IsSelected(pawn);
+        public static bool ShouldLog(this Pawn pawn) => pawn.IsColonist;
         static Startup2()
         {
             //var postfix = AccessTools.Method(typeof(Startup2), "Postfix");

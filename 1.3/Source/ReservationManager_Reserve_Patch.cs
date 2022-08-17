@@ -1,6 +1,7 @@
 ﻿using HarmonyLib;
 using RimWorld;
 using System.Collections.Generic;
+using System.Diagnostics;
 using UnityEngine;
 using Verse;
 using Verse.AI;
@@ -41,44 +42,35 @@ namespace StackReservationFix
     //    }
     //}
 
-    [HarmonyPatch(typeof(StoreUtility), "IsGoodStoreCell")]
-    public static class StoreUtility_IsGoodStoreCell_Patch
+
+    public static class Log
     {
-        private static void Postfix(ref bool __result, IntVec3 c, Map map, Thing t, Pawn carrier, Faction faction)
+        private static bool debug = true;
+        public static void Message(string message)
         {
-            if (__result)
-            {
-                Log.Message("IsGoodStoreCell --------------------- " + carrier + " job " + carrier.CurJob.JobSummary());
-                var job = carrier.CurJob;
-                bool carryingJob = job.IsHaulingJob();
-                Log.Message(carrier + " - " + job.JobSummary() + " - carryingJob: " + carryingJob + " - t: " + t);
-                if (StackReservationFixMod.deepStorageLoaded
-                    && DeepStorageHelper.HasDeepStorageAndCanUse(t, carryingJob ? job : null, carrier, c, out var canUse))
-                {
-                    __result = canUse;
-                    Log.Message("good cell: " + c + " - " + __result + " for " + t);
-                    if (__result)
-                    {
-                        Helpers.thingsByCell[t] = c;
-                        Log.Message("Registering " + t + " for " + c);
-                    }
-                }
-                Log.Message("---------------------");
-            }
+            Verse.Log.ResetMessageCount();
+            if (debug)
+                Verse.Log.Message(message);
+        }
+
+        public static void Error(string error)
+        {
+            Verse.Log.ResetMessageCount();
+            if (debug)
+                Verse.Log.Error(error);
         }
     }
-    
+
     [HarmonyPatch(typeof(ReservationManager), "Reserve")]
     public static class ReservationManager_Reserve_Patch
     {
         private static bool Prefix(ref bool __result, Pawn claimant, Job job, LocalTargetInfo target, int maxPawns = 1, int stackCount = -1, ReservationLayerDef layer = null, bool errorOnFailed = true)
         {
-            Log.ResetMessageCount();
             if (target.Thing is null)
             {
                 if (StackReservationFixMod.deepStorageLoaded)
                 {
-                    Log.Message("Reserve -------------------------- " + claimant + " job: " + job.JobSummary());
+                    Log.Message("Reserve -------------------------- " + claimant + " job: " + job.JobSummary(claimant) + " - " + new StackTrace());
                     if (job.IsHaulingJob() && DeepStorageHelper.HasDeepStorageAndCanUse(null, job, claimant, target.Cell, out var canUse))
                     {
                         __result = canUse;
@@ -87,8 +79,8 @@ namespace StackReservationFix
                     }
                     else
                     {
-                        Log.Message("Failed: " + claimant + " - " + job.JobSummary() + " - " + target + " - " + job.IsHaulingJob());
-                        Find.TickManager.CurTimeSpeed = TimeSpeed.Paused;
+                        Log.Error("Failed: " + claimant + " - " + job.JobSummary(claimant) + " - " + target + " - " + job.IsHaulingJob());
+                        //Find.TickManager.CurTimeSpeed = TimeSpeed.Paused;
                     }
                     Log.Message("--------------------------");
                 }

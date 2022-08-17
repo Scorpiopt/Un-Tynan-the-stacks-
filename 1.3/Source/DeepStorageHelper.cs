@@ -2,7 +2,9 @@
 using RimWorld;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Net.NetworkInformation;
 using UnityEngine;
 using Verse;
 using Verse.AI;
@@ -19,42 +21,10 @@ namespace StackReservationFix
         }
         public static void CapacityToStoreThingAtPostfix(LWM.DeepStorage.CompDeepStorage __instance, ref int __result, Thing thing, Map map, IntVec3 cell)
         {
-            Log.ResetMessageCount();
-            var curPawn = JobGiver_Work_TryIssueJobPackage_Patch.curPawn;
-            if (curPawn != null)
+            if (__result > 0)
             {
-                Log.Message("2 cur pawn: " + curPawn + " ------------------------");
-                Log.Message("Things by cell: ");
-                foreach (var kvp in Helpers.thingsByCell)
-                {
-                    Log.Message(kvp.Key + " - " + kvp.Value);
-                }
-                var additionalThings = new List<Thing>();
-                Dictionary<ThingDef, int> result = new Dictionary<ThingDef, int>();
-                var otherPawns = map.mapPawns.SpawnedPawnsInFaction(curPawn.Faction).Where(x => x != curPawn).Distinct().ToList();
-                Log.Message("otherPawns: " + otherPawns.Count);
-                foreach (var otherPawn in otherPawns)
-                {
-                    Log.Message("Checking other pawn: " + otherPawn + " - for " + cell + " - job: " + otherPawn.CurJob.JobSummary());
-                    GetNumOfStackFromPawn(result, cell, otherPawn);
-                }
-                foreach (var r in result)
-                {
-                    Log.Message("Cell: " + cell + ", subtracting " + r.Value + " from " + __result + " result: " + (__result - r.Value));
-                    __result -= r.Value;
-                }
-                if (__result > 0)
-                {
-                    Log.Message("Registering thing " + thing + " at cell " + cell);
-                    Helpers.thingsByCell[thing] = cell;
-                }
-                Log.Message("CapacityToStoreThingAtPostfix: __instance: " + __instance + " - thing: " + thing + " - cell: " + cell + " - __result: " + __result);
+                Helpers.thingsByCell[thing] = cell;
             }
-            else
-            {
-                Log.Message("Missing cur pawn");
-            }
-            Log.Message("------------------------");
         }
 
         public static int CapacityToStoreThingAt(LWM.DeepStorage.CompDeepStorage __instance, Thing thing, List<Thing> additionalThings,
@@ -128,6 +98,20 @@ namespace StackReservationFix
         }
         public static bool HasDeepStorageAndCanUse(Thing thingToBeHauled, Job job, Pawn hauler, IntVec3 cell, out bool canUse)
         {
+            Log.Message("HasDeepStorageAndCanUse ---------------------------------");
+            if (thingToBeHauled != null)
+            {
+                Log.Message("thingToBeHauled: " + thingToBeHauled + " - " + thingToBeHauled.PositionHeld + " - " + thingToBeHauled.ParentHolder);
+            }
+            if (job != null)
+            {
+                var firstHauledThing = FirstHauledThingFromJob(job);
+                if (firstHauledThing != null)
+                {
+                    Log.Message("firstHauledThing: " + firstHauledThing + " - " + firstHauledThing.PositionHeld + " - " + firstHauledThing.ParentHolder);
+                }
+            }
+            hauler.jobs.debugLog = hauler.ShouldLog();
             canUse = true;
             var buildingStorage = cell.GetFirstThing<Building_Storage>(hauler.Map);
             if (buildingStorage != null)
@@ -135,32 +119,89 @@ namespace StackReservationFix
                 var comp = buildingStorage.GetComp<LWM.DeepStorage.CompDeepStorage>();
                 if (comp != null)
                 {
-                    Dictionary<ThingDef, int> result = new Dictionary<ThingDef, int>();
-                    if (thingToBeHauled != null)
-                    {
-                        result.AddStack(hauler, cell, thingToBeHauled, thingToBeHauled.stackCount);
-                        Log.Message("1: " + hauler + " - added stack for thingToBeHauled: " + thingToBeHauled);
-                    }
-                    GetAllStacksGoingToStorage(result, hauler, cell, job);
                     var allStacks = 0;
+                    Dictionary<ThingDef, Dictionary<Thing, int>> result = new Dictionary<ThingDef, Dictionary<Thing, int>>();
+                    if (thingToBeHauled != null && job?.count > 0)
+                    {
+                        //Helpers.AddThingHaul(hauler, cell, thingToBeHauled, thingToBeHauled.stackCount);
+                        Log.Message("1: " + hauler + " - added stack for thingToBeHauled: " + thingToBeHauled + " - job.count: " + job?.count);
+                        AddStack(result, thingToBeHauled, job.count);
+                    }
+                    else if (thingToBeHauled != null)
+                    {
+                        Log.Message("Ignoring thingToBeHauled: " + thingToBeHauled + " - " + thingToBeHauled.PositionHeld + " - " + thingToBeHauled.ParentHolder);
+                        hauler.Map.debugDrawer.FlashCell(thingToBeHauled.PositionHeld);
+                    }
+                    foreach (var thing in hauler.Map.thingGrid.ThingsListAt(cell).Where(x => x.def.EverStorable(willMinifyIfPossible: false)))
+                    {
+                        AddStack(result, thing, thing.stackCount);
+                        Log.Message("2 Adding stack from " + thing + " - " + thing.Position);
+                    }
+                    foreach (var kvp in Helpers.haulers)
+                    {
+                        foreach (var thingsToHaul in kvp.Value.thingsToHaul)
+                        {
+                            if (thingsToHaul.Value.destination == cell)
+                            {
+                                if (thingsToHaul.Key != thingToBeHauled)
+                                {
+                                    AddStack(result, thingsToHaul.Key, thingsToHaul.Value.count);
+                                    Log.Message("3 Adding stack from " + thingsToHaul.Key + " - " + thingsToHaul.Value.destination);
+                                }
+                            }
+                        }
+                    }
                     foreach (var r in result)
                     {
-                        allStacks += r.Value / r.Key.stackLimit;
+                        var count = 0;
+                        foreach (var def in r.Value)
+                        {
+                            count += def.Value;
+                            Log.Message(def.Key + " - PositionHeld: " + def.Key.PositionHeld + " - ParentHolder: " + def.Key.ParentHolder + " - def.Value: " + def.Value + " - count: " + count + " - stackCount: " + def.Key.stackCount);
+                        }
+                        var maxCount = comp.maxNumberStacks * r.Key.stackLimit;
+                        Log.Message("maxCount: " + maxCount + " - count: " + count);
+                        if (maxCount - count <= 0)
+                        {
+                            Log.Message("Cannot use: count is eq maxCount");
+                            canUse = false;
+                        }
+                        allStacks += Mathf.CeilToInt(count / (float)r.Key.stackLimit);
                     }
+
                     if (allStacks > comp.maxNumberStacks)
                     {
+                        Log.Message("Cannot use: allStacks > comp.maxNumberStacks");
                         canUse = false;
                     }
-                    var firstHauledThing = FirstHauledThingFromJob(job);
+
                     //if (firstHauledThing != null)
                     //{
                     //    canUse = comp.CapacityToStoreThingAt(firstHauledThing, hauler.Map, cell) > 0;
                     //}
-                    Log.Message(hauler + " - All stacks: " + allStacks + " - for cell " + cell + " - " + canUse + " - job: " + job.JobSummary() + " - firstHauledThing: " + firstHauledThing);
+                    Log.Message(hauler + " - All stacks: " + allStacks + " - for cell " + cell + " - " + canUse + " - job: " + job.JobSummary(hauler)
+                        + " - " + new StackTrace());
                     return true;
                 }
             }
             return false;
+        }
+
+        private static void AddStack(Dictionary<ThingDef, Dictionary<Thing, int>> dict, Thing thing, int count)
+        {
+            if (!dict.TryGetValue(thing.def, out var stackDict))
+            {
+                dict[thing.def] = stackDict = new Dictionary<Thing, int>();
+            }
+            if (stackDict.ContainsKey(thing))
+            {
+                stackDict[thing] += count;
+            }
+            else
+            {
+                stackDict[thing] = count;
+            }
+            Log.Message(thing + " - " + count);
         }
 
         public static Thing FirstHauledThingFromJob(Job job)
@@ -186,48 +227,14 @@ namespace StackReservationFix
             return null;
         }
 
-        public static void AddStack(this Dictionary<ThingDef, int> result, Pawn hauler, IntVec3 cell, Thing thing, int count)
+        private static void GetNumOfStackFromPawn(IntVec3 targetCell, Pawn pawn)
         {
-            if (result.ContainsKey(thing.def))
-            {
-                result[thing.def] += count;
-            }
-            else
-            {
-                result[thing.def] = count;
-            }
-            Helpers.thingsByCell[thing] = cell;
-            Log.Message(hauler + " - Adding stack for " + thing + " to cell " + cell + " count " + count + " total count " + result[thing.def] / thing.def.stackLimit);
-        }
-
-        public static void GetAllStacksGoingToStorage(Dictionary<ThingDef, int> result, Pawn hauler, IntVec3 cell, Job job)
-        {
-            var otherPawns = hauler.Map.mapPawns.SpawnedPawnsInFaction(hauler.Faction).Where(x => x != hauler).Distinct().ToList();
-            foreach (var thing in hauler.Map.thingGrid.ThingsListAt(cell).Where(x => x.def.EverStorable(willMinifyIfPossible: false)))
-            {
-                result.AddStack(null, cell, thing, thing.stackCount);
-                Log.Message("2: already existing things: " + cell);
-            }
-            Log.Message("Checking job: " + job.JobSummary());
-            if (job != null)
-            {
-                GetNumOfStackFromPawn(result, cell, hauler);
-            }
-            foreach (var otherPawn in otherPawns)
-            {
-                Log.Message("Checking pawn: " + otherPawn + " - " + otherPawn.CurJob.JobSummary());
-                GetNumOfStackFromPawn(result, cell, otherPawn);
-            }
-        }
-
-        private static void GetNumOfStackFromPawn(Dictionary<ThingDef, int> result, IntVec3 targetCell, Pawn pawn)
-        {
-            GetNumOfStackFromJob(result, pawn, pawn.CurJob, targetCell);
+            GetNumOfStackFromJob(pawn, pawn.CurJob, targetCell);
             foreach (var queuedJob in pawn.jobs.jobQueue)
             {
                 if (queuedJob.job != null)
                 {
-                    GetNumOfStackFromJob(result, pawn, queuedJob.job, targetCell);
+                    GetNumOfStackFromJob(pawn, queuedJob.job, targetCell);
                 }
             }
 
@@ -239,7 +246,7 @@ namespace StackReservationFix
                     var storageCell = Helpers.GetStorageCell(thing, IntVec3.Invalid);
                     if (storageCell == targetCell)
                     {
-                        result.AddStack(pawn, targetCell, thing, thing.stackCount);
+                        //Helpers.AddThingHaul(pawn, targetCell, thing, thing.stackCount);
                         Log.Message("3: " + pawn + " has thing in inventory going to : " + storageCell);
                     }
                     else
@@ -250,23 +257,25 @@ namespace StackReservationFix
             }
         }
 
-        private static void GetNumOfStackFromJob(Dictionary<ThingDef, int> result, Pawn pawn, Job job, IntVec3 targetCell)
+        private static void GetNumOfStackFromJob(Pawn pawn, Job job, IntVec3 targetCell)
         {
             if (job != null && job.targetB.Cell == targetCell)
             {
                 if (job.def.defName == "HaulToInventory")
                 {
-                    GetNumOfStacksTargetA(result, pawn, job, targetCell);
-                    GetNumOfStacksTargetQueueA(result, pawn, job, targetCell);
+                    GetNumOfStacksTargetA(pawn, job, targetCell);
+                    GetNumOfStacksTargetQueueA(pawn, job, targetCell);
+                    Log.Message("Checking pawn: " + pawn + " - " + pawn.CurJob.JobSummary(pawn));
                 }
                 else if ((job.def == JobDefOf.HaulToCell || job.def.defName == "UnloadYourHauledInventory"))
                 {
-                    GetNumOfStacksTargetA(result, pawn, job, targetCell);
+                    GetNumOfStacksTargetA(pawn, job, targetCell);
+                    Log.Message("Checking pawn: " + pawn + " - " + pawn.CurJob.JobSummary(pawn));
                 }
             }
         }
 
-        private static void GetNumOfStacksTargetQueueA(Dictionary<ThingDef, int> result, Pawn pawn, Job job, IntVec3 targetCell)
+        private static void GetNumOfStacksTargetQueueA(Pawn pawn, Job job, IntVec3 targetCell)
         {
             if (job.targetQueueA != null)
             {
@@ -276,14 +285,14 @@ namespace StackReservationFix
                     if (targetCell == storageCell)
                     {
                         var index = job.targetQueueA.IndexOf(item);
-                        result.AddStack(pawn, targetCell, item.Thing, job.countQueue[index]);
+                        //Helpers.AddThingHaul(pawn, targetCell, item.Thing, job.countQueue[index]);
                         Log.Message("4: " + pawn + " has thing from job to : " + storageCell);
                     }
                 }
             }
         }
 
-        private static void GetNumOfStacksTargetA(Dictionary<ThingDef, int> result, Pawn pawn, Job job, IntVec3 targetCell)
+        private static void GetNumOfStacksTargetA(Pawn pawn, Job job, IntVec3 targetCell)
         {
             if (job.targetA.Thing != null)
             {
@@ -291,7 +300,7 @@ namespace StackReservationFix
                 if (targetCell == storageCell)
                 {
                     var haulCount = Mathf.Min(job.count, job.targetA.Thing.stackCount);
-                    result.AddStack(pawn, targetCell, job.targetA.Thing, haulCount);
+                    //Helpers.AddThingHaul(pawn, targetCell, job.targetA.Thing, haulCount);
                     Log.Message("5: " + pawn + " has thing from job to : " + storageCell);
                 }
             }
